@@ -1,0 +1,325 @@
+---
+title: 'Actividad 3: Text Mining en Pubmed usando R'
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+Cuando vamos a empezar un proyecto de trabajo o de investigación en ingeniería y ciencias es muy importante entender el <em>estado del arte</em> y usar la información que ya existe para obtener un mejor resultado. En esta actividad vamos a usar `R` para hacer un análisis más extenso de la literatura relacionada al cáncer de colon en gente joven.
+
+### 1. RISmed
+El paquete`RISmed` sirve para descargar contenido de las bases de datos de NCBI (National Center for Biotechnology Information). Lo podemos instalar e importar como cualquier otro paquete de `R`.
+
+De igual manera importamos tidyverse para poder hacer visualizaciones y filtrar data frames.
+```{r}
+#install.packages("RISmed")
+library(RISmed)
+library(tidyverse)
+library(dplyr)
+library(ngram)
+```
+
+Primero que nada, necesitamos definir el query (búsqueda) que queremos hacer. En este caso tenemos tres palabras clave que queremos encontrar en todos los documentos y otras cuatro de las cuales queremos encontrar al menos una de ellas por documento, es decir:
+
+Todos los documentos deben contener las siguientes palabras clave en el título o abstract,
+
+<ul>
+  <li>colon</li>
+  <li>cancer</li>
+  <li>young</li>
+</ul>
+
+Además, todos los documentos deben contener al menos una de estas palabras clave,
+
+<ul>
+  <li>mutation</li>
+  <li>alteration</li>
+  <li>treatment</li>
+  <li>hereditary</li>
+</ul>
+
+### 2. Cómo hacer un Query
+
+Existen algunas consideraciones al momento de hacer nuestro query. Para una descripción muy detallada de cómo hacer queries en pubmed puedes revisar [est a liga](https://www.ncbi.nlm.nih.gov/books/NBK3827/#pubmedhelp).
+
+##### Consideración 1: Usando comillas
+
+Para ello necesitamos poner cada palabra clave entre comillas. Como necesitamos definir nuestro query como un string, cada que queremos poner las dobles comillas, `"`, R lo interpreta como que estamos cerrando o abriendo un string, por lo tanto usamos la barra invertida `\` (backslash en inglés) para decirle a `R` que ignore la función normal de las comillas y solo las considere como parte del string
+
+##### Consideración 2: Qué queremos encontrar con la palabra clave
+
+Cuando ponemos una palabra para buscar, podemos agregar un descriptor que le indica a Pubmed cómo usar la palabra clave que solicitamos dentro de la búsqueda. Esto se logra con el siguiente formato:
+
+`"<palabra clave>"[<descriptor>]`
+
+Nota que ponemos la palabra clave entre comillas y el descriptor entre corchetes.
+
+Al momento de hacer un query podemos buscar algo en un campo específico. Por ejemplo, tal vez quiero buscar la palabra clave <em>"cancer"</em> pero solo quiero buscar en el abstract o título del documento. Esto se debe a que un documento podría mencionar mi palabra clave sin estar muy relacionado, sin embargo, si la palabra está en el título o abstract, entonces es mucho más probable que esté muy relacionado. Para hacer eso podemos usar el descriptor `TIAB` (title and abstract) para cada palabra clave. Esto le dice al query que sólo queremos buscar en el título o abstract.
+
+Otros ejemplos de descriptores que podemos pasar son,
+
+<ul>
+  <li>`AU`: Autor</li>
+  <li>`book`: Libro</li>
+  <li>`ISBN`: ISBN</li>
+  <li>`LA`: Lenguaje</li>
+  <li>`Text Words`: Todas las palabras y números en varios elementos del documento</li>
+  <li>`DP`: Fecha de publicación</li>
+  <li>`Journal`: Revista donde se publicó el artículo</li>
+</ul>
+
+Existen muchos otros descriptores que puedes consultar [aquí](https://www.ncbi.nlm.nih.gov/books/NBK3827/#pubmedhelp.I_m_not_finding_what_I_need_H)
+
+##### Consideración 3: Usando varias palabras en un query
+
+Siempre es una buena idea intentar delimitar nuestra búsqueda tanto como podamos en este caso como ya dijimos tenemos tres palabras que deben estar en todos los resultados y otras cuatro las cuáles necesitamos que esté al menos una de ellas, para eso vamos a usar operadores lógicos como `AND` y `OR`.
+
+##### Query
+
+Por ejemplo, si quiero buscar las palabras "Perro" y "Gato" en los títulos o abstracts mi query sería,
+
+```
+""\Perro\"[TIAB] AND \"Gato\"[TIAB]"
+```
+
+O si quiero encontrar ya sea "Perro" o "Gato" mi query sería,
+
+```
+""\Perro\"[TIAB] OR \"Gato\"[TIAB]"
+```
+
+Con todo esto en mente, escribe el query, basado en las condiciones señaladas en la sección anterior. Busca en el título y abstract (es decir usa [TIAB] para todas tus palabras clave)
+
+```{r}
+query_colon <- "\"Colon\"[TIAB] AND \"Cancer\"[TIAB] AND \"young\"[TIAB] OR \"mutation\"[TW] OR \"alteration\"[TW] OR \"treaty\"[TW]OR \"hereditary\"[TW]"
+```
+
+Este query se lo pasamos a la función de `RISmed`, `EUtilsSummary()`. Cuyo resultado pasamos a la función `summary` la cual muestra el query con un mejor formato y el número de resultados encontrados.
+
+```{r}
+search_query <- EUtilsSummary(query_colon)
+summary(search_query)
+```
+
+`EUtilsSummary` sirve para ver el resumen de la búsqueda pero si queremos acceder a los datos entonces más bien usamos la función `EUtilsGet`, guardamos los resultados en una nueva variable,  `records`.
+
+```{r}
+
+records <- EUtilsGet(search_query)
+```
+
+Si estás usando RStudio te recomiendo darle click a esta variable en la pestaña de `Environment` para que puedas ver su contenido, ahí podrás ver toda la información que recuperamos.
+
+Ahora pongamos esa información en un formato que nos sirva para analizar, dentro de `R`, es decir un data frame.
+
+```{r}
+pubmed_data <- data.frame('Title'=ArticleTitle(records),
+                          'Abstract'=AbstractText(records),
+                          'PID'=ArticleId(records),
+                          'Year'=YearReceived(records),
+                          stringsAsFactors = F)
+
+#Visualicemos los primeros 6 ejemplos
+head(pubmed_data)
+```
+
+Tú puedes decidir qué agregarle al data frame solo escoge valores basados en lo que encuentres en `records` que te parezcan interesantes.
+
+### 3. Limpieza de los textos recuperados
+
+Ahora que tenemos los datos necesarios vale la pena hacer una pequeña limpieza de símbolos innecesarios, empezamos con la función `gsub` la cual toma tres argumentos,
+
+<ul>
+  <li>`pattern`: Para indicar los valores que queremos reemplazar</li>
+  <li>`replacement`: Indicar cual es el nuevo texto que queremos</li>
+  <li>`text`: Indica el texto donde queremos buscar</li>
+</ul>
+
+En `pattern` podemos escoger varios caracteres en lugar de uno usando el símbolo `|` (que significa OR), es decir que podemos buscar tantas cosas queramos en el texto y lo separamos usando `|`.
+
+Puedes consultar más detalles de formatos de strings [aqpauí](https://r4ds.had.co.nz/strings.html#matching-patterns-with-regular-expressions). Queremos deshacernos de ciertos caracteres pero para especificarlos dentro de un string necesitamos un símbolo especial, la siguiente lista nos da algunos ejemplos:
+
+<ul>
+  <li>Punto (`.`): se escribe `\\.`</li>
+  <li>Dos puntos (`:`): se escribe igual</li>
+  <li>Punto y coma (`;`): se escribe igual</li>
+  <li>Abrir corchete (`[`): se escribe `\[`</li>
+  <li>Cerrar corchete (`]`): se escribe `\]`</li>
+</ul>
+
+Con esto en mente, el siguiente código remueve los caracteres de la lista anterior de los títulos y abstracts y lo vuelve a guardar en el dataframe.
+
+```{r}
+pubmed_data$Title <- gsub(pattern="\\.|:|,|;|\\[|\\]|\\(|\\)",
+                          replacement="",
+                          pubmed_data$Title)
+
+pubmed_data$Abstract <- gsub(pattern="\\.|:|,|;|\\[|\\]|\\(|\\)",
+                             replacement="",
+                             pubmed_data$Abstract)
+
+```
+
+También podemos usar la función `tolower()` para poner todo en minúsculas,
+
+```{r}
+pubmed_data$Title <- tolower(pubmed_data$Title)
+pubmed_data$Abstract <- tolower(pubmed_data$Abstract)
+```
+
+### 4. Obtener un nuevo data frame con todas las palabras
+
+El siguiente código tiene muchos detalles, pero lo importante es que al final tendremos un nuevo data frame llamdo `word_list` que tiene dos columnas:
+
+<ul>
+  <li>PID: El ID de Pubmed del Documento</li>
+  <li>Word: Una palabra que aprece en el PID</li>
+</ul>
+
+Este código también borra palabras duplicadas dentro de un mismo documento, así que si se usa la palabra "cancer" (por ejemplo) más de una vez en un documento, ésta solo aparece una vez relacionada a ese `PID`, pero si la palabra aparece otra vez en otro documento entonces vuelve a aparecer.
+
+```{r}
+word_list <- c()
+
+for (i in 1:length(pubmed_data$Abstract)){
+  # Separa el abstract en cada palabra en lugar de un solo string
+  aux_word <- unlist(strsplit(pubmed_data$Abstract[i]," "))
+  if(length(aux_word) > 0){
+    # Guarda las palabras únicas en este abstract
+    aux_list <- cbind(pubmed_data$PID[i],unique(aux_word))
+    # Ve agregando al data frame final
+    word_list <- rbind(word_list,aux_list)
+  }
+}
+
+# word_list es una matriz pero después de esta línea es un data frame
+word_list <- as.data.frame(word_list, stringsAsFactors = F)
+# Pon nombres nuevos a las columnas del data frame
+names(word_list) <- c("PID","Word")
+```
+
+Con esta línea puedes visualizar tu nuevo Data Frame
+
+```{r}
+head(word_list)
+```
+
+### 5. Quitar Stop Words
+
+Las stopwords son palabras comunes que aunque pueden aportar al significado de la oración no son palabras clave porque se suelen repetir mucho, algunos ejemplos de stopwords en inglés son, "I", "me", "on", "a", "the", etc.
+
+Podemos encontrar stopwords con el paquete "tm", al igual que cualquier otro paquete se puede instalar con un solo comando.
+
+```{r}
+# install.packages("tm")
+# install.packages("NLP")
+library(tm)
+```
+
+El siguiente bloque de código usa la función `stopwords` del paquete `tm` para encontrar stopwords en inglés.
+
+```{r}
+# Conseguir stop words
+stop_words <- stopwords(kind="en")
+```
+
+La variable stopwords, es un vector de tipo caracter que guarda las stopwords en inglés, por ejemplo, "I", "so", "a", "the", etc. Ahora que tienes una lista con stop words puedes usar el comando `filter()` (que aprendimos la clase pasada) para crear un nuevo dataframe llamado `word_list_no_stopwords` que no tenga stopwords.
+
+Pista: Puedes usar el comando `%in%` para filtrar todos los valores de una lista. Si quieres obtener lo opuesto a una de tus condiciones puedes usar el símbolo `!` (NOT) para negar toda una expresión.
+
+```{r}
+word_list_no_stopwords <- word_list %>% filter(!(Word %in% stop_words) )
+print(word_list_no_stopwords)
+print(length(word_list$Word))
+print(length(word_list_no_stopwords$Word))
+
+```
+
+Y ahora que tenemos eso, podemos usar `summarise` con `groupby` y `arrange` (clase anterior) para encontrar un dataframe con cada palabra y las veces que se repite.
+
+
+```{r}
+# Crea aquí un dataframe de nombre df_wordocounts con dos columnas, una con la palabra y otra con las veces que se repite en el data frame word_list_no_stopwords.
+df_wordcounts <- word_list_no_stopwords %>% group_by(Word) %>% summarise("Counts" = n()) %>% arrange(desc(Counts))
+print(df_wordocounts)
+```
+
+Para quedarnos con las primeras `n` filas podemos usar el siguiente comando. Escoge el que te parezca más indicado.
+
+```{r}
+n <- 10
+
+df_wordcounts_topn <- df_wordcounts[1:n,]
+
+```
+
+Podemos Visualizarlo
+
+```{r}
+df_wordcounts_topn
+```
+
+Ahora haz un diagrama de barras enseñando las n (tú elige el valor de n que más te guste) palabras más frecuentes en los documentos.
+
+
+##### Nota:
+
+Cuando hicimos un diagrama de barras en la actividad anterior solo necesitábamos dar el valor de `x` y `ggplot` se encargaba solo de contar. En este caso ya contamos usando summarise entonces cuando agregamos el geom lo tenemos que hacer de la siguiente manera.
+
+```
+geom_bar(mapping = aes(x = <variable para el eje x>, y = <variable para el eje y>), stat='identity')
+```
+
+Básicamente, la diferencia entre este código y el anterior es que especificamos los valores de `x` y `y` y agregamos el argumento `stat='identity'` para decirle a ggplot que no tiene que sumar los valores.
+
+```{r}
+ggplot(data= df_wordcounts_topn) + geom_bar(df_wordcounts_topn, mapping = aes(x = Word, y = Counts),stat = "identity")
+```
+
+### 6. Buscar genes entre las palabras
+
+Por último, encontremos menciones de algunos genes asociados con el cáncer de colon, estos genes son:
+
+<ul>
+  <li>apc</li>
+  <li>kras</li>
+  <li>tp53</li>
+</ul>
+
+Lo que tienes que hacer ahora es:
+
+1. Filtrar el data frame `word_list_no_stopwords` para que solo contenga estos tres genes
+1. Imprimir el PID de 3 artículos donde se hable de cada uno de estos genes (3 artículos por gen)
+1. Crear un nuevo gráfico de barras donde muestres la frecuencia de cada uno de estos tres genes, similar al gráfico de barras anterior.
+1. Responde: (a) ¿Cuántos artículos hablan de cualquiera de estos genes? (cuidado, un artículo puede hablar de más de uno de ellos) (b) De estos tres genes, ¿cuál es del que más se habla en los artículos?
+
+```{r}
+genes_list <- word_list_no_stopwords %>% filter(Word == c("apc","kras","tp53"))
+
+apc <- genes_list %>% filter(Word == "apc") %>% select(PID)
+kras <- genes_list %>% filter(Word == "kras") %>% select(PID) 
+tp53 <- genes_list %>% filter(Word == "tp53") %>% select(PID) 
+apc <- apc$PID[1:3]
+kras <- kras$PID
+tp53 <- tp53$PID
+genes_pid <- data.frame("apc" = apc, "kras" = kras, "tp53" = tp53)
+print(genes_pid)
+
+genes_summary <- genes_list %>% group_by(Word) %>% summarise("Counts" = n()) 
+ggplot(data= genes_summary) + geom_bar(genes_summary, mapping = aes(x = Word, y = Counts),stat = "identity")
+
+print(genes_list)
+
+
+
+```
+
+### 7. Qué tengo que entregar?
+
+Para este actividad hay tres partes que entregar
+
+1. El código de este cuaderno completo, lo puedes hacer dentro del notebook y mandarlo. No olvides hacer todos los códigos que se piden y responder a lo que se pregunta.
+2. Un breve reporte de lo que hiciste en este cuaderno, donde muestres tus resultados (las palabras que más se repiten, los genes que más se repiten, tus visualizaciones, las respuestas a las preguntas que se hacen en el punto 4 de la sección 6)
+3. Leer el [siguiente artículo](https://www.nature.com/articles/nature11252) (si el link no funciona lo puedes encontrar también en Canvas) y comentar el impacto que tuvo el uso de algoritmos en el desarrollo de este estudio.
